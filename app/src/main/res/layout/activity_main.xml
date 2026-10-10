@@ -73,5 +73,12 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="24dp"
             android:textSize="18sp" />
+
+        <Button
+            android:id="@+id/btnResetPosition"
+            style="?android:attr/borderlessButtonStyle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Popup-Position zurücksetzen" />
     </LinearLayout>
 </ScrollView>

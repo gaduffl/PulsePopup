@@ -17,6 +17,7 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.drawable.Icon
@@ -43,6 +44,7 @@ class HeartRateService : Service() {
 
     companion object {
         const val ACTION_STOP = "com.gaduffl.pulsepopup.STOP"
+        const val ACTION_RESET_POSITION = "com.gaduffl.pulsepopup.RESET_POSITION"
         @Volatile
         var running = false
 
@@ -51,6 +53,8 @@ class HeartRateService : Service() {
         private const val TICK_MS = 500L
         private const val STALE_MS = 8000L
         private const val RECONNECT_MS = 3000L
+        private const val DEFAULT_X = 24
+        private const val DEFAULT_Y = 200
     }
 
     private val main = Handler(Looper.getMainLooper())
@@ -69,6 +73,7 @@ class HeartRateService : Service() {
     private var address: String? = null
     private var deviceName: String = ""
     private var stopped = false
+    private var initialized = false
     private var connected = false
     private var lastBpm = 0
     private var lastUpdate = 0L
@@ -113,11 +118,30 @@ class HeartRateService : Service() {
         prefs.registerOnSharedPreferenceChangeListener(prefListener)
         main.post(ticker)
         connect()
+        initialized = true
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) stopSelf()
+        when (intent?.action) {
+            ACTION_STOP -> stopSelf()
+            ACTION_RESET_POSITION -> resetOverlayPosition()
+        }
         return START_NOT_STICKY
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // Rotation: start again from the position the user chose and fit it into the new
+        // screen, so a spot picked in landscape doesn't end up off-screen in portrait.
+        val view = overlay ?: return
+        main.post {
+            if (view.isAttachedToWindow) {
+                params.x = prefs.getInt(Prefs.KEY_X, DEFAULT_X)
+                params.y = prefs.getInt(Prefs.KEY_Y, DEFAULT_Y)
+                clampToScreen(view)
+                windowManager.updateViewLayout(view, params)
+            }
+        }
     }
 
     override fun onDestroy() {
@@ -295,20 +319,66 @@ class HeartRateService : Service() {
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = prefs.getInt(Prefs.KEY_X, 24)
-            y = prefs.getInt(Prefs.KEY_Y, 200)
+            x = prefs.getInt(Prefs.KEY_X, DEFAULT_X)
+            y = prefs.getInt(Prefs.KEY_Y, DEFAULT_Y)
         }
+        // A position saved on a bigger/rotated screen could otherwise be off-screen.
+        clampToScreen(view)
 
         view.setOnTouchListener(DragTouchListener())
-        windowManager.addView(view, params)
+        try {
+            windowManager.addView(view, params)
+        } catch (e: RuntimeException) {
+            overlay = null
+            getSystemService(NotificationManager::class.java).notify(
+                NOTIF_ID,
+                buildNotification("Popup kann nicht angezeigt werden – „Über anderen Apps einblenden“ prüfen")
+            )
+            return
+        }
         overlay = view
         applyTimerVisibility()
         updateUi()
+    }
+
+    /** Keeps the popup fully inside the screen. */
+    private fun clampToScreen(view: View) {
+        val metrics = resources.displayMetrics
+        var w = view.width
+        var h = view.height
+        if (w == 0 || h == 0) {
+            view.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED)
+            w = view.measuredWidth
+            h = view.measuredHeight
+        }
+        params.x = params.x.coerceIn(0, (metrics.widthPixels - w).coerceAtLeast(0))
+        params.y = params.y.coerceIn(0, (metrics.heightPixels - h).coerceAtLeast(0))
+    }
+
+    /** Moves the popup back to its default position and re-adds it if it went missing. */
+    private fun resetOverlayPosition() {
+        prefs.edit().remove(Prefs.KEY_X).remove(Prefs.KEY_Y).apply()
+        if (!initialized || stopped) return
+        val view = overlay
+        if (view != null && view.isAttachedToWindow) {
+            params.x = DEFAULT_X
+            params.y = DEFAULT_Y
+            clampToScreen(view)
+            windowManager.updateViewLayout(view, params)
+            return
+        }
+        if (view != null) {
+            try {
+                windowManager.removeView(view)
+            } catch (_: RuntimeException) {
+            }
+            overlay = null
+        }
+        if (Settings.canDrawOverlays(this)) addOverlay()
     }
 
     private fun applyTimerVisibility() {
@@ -359,8 +429,9 @@ class HeartRateService : Service() {
                         main.removeCallbacks(longPress)
                     }
                     if (moved) {
-                        params.x = (startX + dx).toInt().coerceAtLeast(0)
-                        params.y = (startY + dy).toInt().coerceAtLeast(0)
+                        params.x = (startX + dx).toInt()
+                        params.y = (startY + dy).toInt()
+                        clampToScreen(v)
                         windowManager.updateViewLayout(v, params)
                     }
                 }
@@ -397,15 +468,20 @@ class HeartRateService : Service() {
             Intent(this, HeartRateService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
+        val resetPosition = PendingIntent.getService(
+            this, 2,
+            Intent(this, HeartRateService::class.java).setAction(ACTION_RESET_POSITION),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val icon = Icon.createWithResource(this, R.drawable.ic_heart)
         return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_heart)
             .setContentTitle(getString(R.string.app_name))
             .setContentText(text)
             .setContentIntent(open)
             .setOngoing(true)
-            .addAction(Notification.Action.Builder(
-                    Icon.createWithResource(this, R.drawable.ic_heart), "Beenden", stop
-                ).build())
+            .addAction(Notification.Action.Builder(icon, "Popup zurückholen", resetPosition).build())
+            .addAction(Notification.Action.Builder(icon, "Beenden", stop).build())
             .build()
     }
 
