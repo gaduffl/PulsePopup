@@ -16,6 +16,9 @@ Im Popup: **Ziehen** = verschieben (Position wird gespeichert), **Tippen** = Tim
 **langes Drücken** = Timer zurücksetzen. Der Timer startet automatisch beim ersten Pulswert und
 lässt sich in der App ausblenden. Bei Verbindungsabbruch verbindet die App automatisch neu.
 
+Popup nicht zu sehen? In der Benachrichtigung auf **„Popup zurückholen“** tippen oder in der App
+**„Popup-Position zurücksetzen“** – das Popup springt dann zurück an den linken oberen Bildschirmrand.
+
 ## Bauen
 
 Android Studio: Projekt öffnen und ausführen (minSdk 26, keine externen Bibliotheken).

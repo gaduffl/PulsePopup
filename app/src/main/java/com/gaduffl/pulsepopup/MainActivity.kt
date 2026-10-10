@@ -37,6 +37,7 @@ class MainActivity : Activity() {
     private lateinit var btnDevice: Button
     private lateinit var cbTimer: CheckBox
     private lateinit var btnStart: Button
+    private lateinit var btnResetPosition: Button
 
     private val handler = Handler(Looper.getMainLooper())
     private val refresher = object : Runnable {
@@ -61,6 +62,7 @@ class MainActivity : Activity() {
         btnDevice = findViewById(R.id.btnDevice)
         cbTimer = findViewById(R.id.cbTimer)
         btnStart = findViewById(R.id.btnStart)
+        btnResetPosition = findViewById(R.id.btnResetPosition)
 
         cbTimer.isChecked = prefs.getBoolean(Prefs.KEY_SHOW_TIMER, true)
         cbTimer.setOnCheckedChangeListener { _, checked ->
@@ -70,6 +72,7 @@ class MainActivity : Activity() {
         btnPerms.setOnClickListener { requestMissing() }
         btnDevice.setOnClickListener { showScanDialog() }
         btnStart.setOnClickListener { toggleService() }
+        btnResetPosition.setOnClickListener { resetPopupPosition() }
     }
 
     override fun onResume() {
@@ -152,6 +155,17 @@ class MainActivity : Activity() {
             startForegroundService(intent)
         }
         handler.postDelayed({ refresh() }, 300)
+    }
+
+    private fun resetPopupPosition() {
+        prefs.edit().remove(Prefs.KEY_X).remove(Prefs.KEY_Y).apply()
+        if (HeartRateService.running) {
+            startService(
+                Intent(this, HeartRateService::class.java)
+                    .setAction(HeartRateService.ACTION_RESET_POSITION)
+            )
+        }
+        Toast.makeText(this, "Popup-Position zurückgesetzt", Toast.LENGTH_SHORT).show()
     }
 
     // ---------------------------------------------------------------- scanning
