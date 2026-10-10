@@ -131,10 +131,13 @@ class HeartRateService : Service() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        // e.g. rotation: keep the popup inside the (new) screen bounds
+        // Rotation: start again from the position the user chose and fit it into the new
+        // screen, so a spot picked in landscape doesn't end up off-screen in portrait.
         val view = overlay ?: return
         main.post {
             if (view.isAttachedToWindow) {
+                params.x = prefs.getInt(Prefs.KEY_X, DEFAULT_X)
+                params.y = prefs.getInt(Prefs.KEY_Y, DEFAULT_Y)
                 clampToScreen(view)
                 windowManager.updateViewLayout(view, params)
             }
